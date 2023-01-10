@@ -25,7 +25,7 @@ OPEN_AI_API_KEY        = "..."    # Your API key from OpenAI
 ```
 
 2) Run `terraform apply`
-3) Use `build.sh` (see the `/functions` folder) to build and upload the lambda image
+3) Use `push_image.sh` (see the `/functions` folder) to build and upload the lambda image
 5) Proceed to `/terraform/main` to apply the main infrastructure layer
 
 Note: Subsequent changes to to the SSM Parameter Store secrets are ignored - if you need to make an update, 
