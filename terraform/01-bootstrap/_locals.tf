@@ -1,11 +1,11 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  product       = "aibot"
-  env           = "prod"
-  region        = "ca-central-1"
-  backup_region = "ap-southeast-2"
-  aws_profile   = "mastodon"
+  product       = var.product
+  env           = var.env
+  region        = var.region
+  backup_region = var.backup_region
+  aws_profile   = var.aws_profile
   account_id    = data.aws_caller_identity.current.account_id
   prefix        = "${local.product}_${local.env}"
 }

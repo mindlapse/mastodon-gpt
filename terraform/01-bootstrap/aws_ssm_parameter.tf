@@ -6,16 +6,15 @@ resource "aws_ssm_parameter" "config" {
   // For security reasons, secrets must be populated manually outside of Terraform.
   value = jsonencode({
 
-    REDIS_URL = ""
-    CLIENT_ID = ""
-    CLIENT_SECRET = ""
-    MASTODON_API_URL = ""
+    MASTODON_API_URL      = ""
+    MASTODON_ACCESS_TOKEN = ""
+    OPEN_AI_API_KEY       = ""
 
   })
 
   lifecycle {
     ignore_changes = [
-      "value"
+      value
     ]
   }
 }
