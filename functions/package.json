@@ -1,0 +1,32 @@
+{
+  "name": "mastodon-gpt",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --verbose"
+  },
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.245.0",
+    "lambda-remote-context": "^2.0.1",
+    "openai": "^3.1.0",
+    "striptags": "^3.2.0",
+    "tsl-mastodon-api": "git://github.com/mindlapse/tsl-mastodon-api.git#notifications-api-delete"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.2.5",
+    "ts-jest": "^29.0.3",
+    "ts-node": "^10.9.1"
+  },
+  "keywords": [
+    "mastodon",
+    "gpt",
+    "openai",
+    "llm",
+    "ai"
+  ]
+}
