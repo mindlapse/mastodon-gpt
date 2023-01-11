@@ -5,7 +5,7 @@ export default class AIReplyCommand {
     static SUFFIX = 'As @gpt, think carefully and respond with an ' +
         'engaging detailed genius response that adds dimensionality. ' +
         "Do not refer to 'us' or 'we' or '@gpt'. Do not put your answer in quotes. " +
-        'The answer must be less than 350 chars. Do not reference to your own response ' +
+        'The answer must be less than 100 words. Do not reference to your own response ' +
         'and do not mention the tweet above.\n\n';
     constructor(mc, oc) {
         this.mastodon = mc;
@@ -22,12 +22,21 @@ export default class AIReplyCommand {
             const { in_reply_to_id } = mentionToot.status;
             if (in_reply_to_id) {
                 originalToot = await this.mastodon.getToot(in_reply_to_id);
-                originalText = extractText(originalToot.json.content);
+                originalText = extractText(originalToot.content);
+                // If the original post was from this bot, then only reply if
+                // the mention included a question mark in it. (less annoying)
+                if (originalToot.account.id === this.mastodon.getUserId() &&
+                    !originalText.includes("?")) {
+                    console.log("Ignoring follow-up mention: a '?' must be present to respond.");
+                    await this.mastodon.deleteMention(mentionToot.id);
+                    continue;
+                }
             }
             // Perform content moderation
             const flagged = await this.openai.isFlaggedByModeration(`${originalText} ${mentionText}`);
             if (flagged) {
                 console.log('Content flagged. Skip.');
+                await this.mastodon.deleteMention(mentionToot.id);
                 continue;
             }
             // Moderation passed, form the completion request

@@ -1,6 +1,7 @@
 import { RemoteClient } from 'lambda-remote-context';
 import * as Mastodon from 'tsl-mastodon-api';
 export default class MastodonClient extends RemoteClient {
+    userId;
     /**
      * Construct a new user-specific Mastodon Client
      *
@@ -17,6 +18,7 @@ export default class MastodonClient extends RemoteClient {
             },
             cleanUp: async () => { },
         });
+        this.userId = config.userId;
     }
     /**
      * Load mentions for this user.
@@ -39,7 +41,7 @@ export default class MastodonClient extends RemoteClient {
      *
      * @param id
      * @throws Error if the toot could not be loaded.
-     * @returns Promise<Mastodon.API.Success<Mastodon.JSON.Status>>
+     * @returns Promise<Mastodon.JSON.Status>
      */
     async getToot(id) {
         const toot = await this.getClient().getStatus(id);
@@ -48,7 +50,7 @@ export default class MastodonClient extends RemoteClient {
             console.error(err, toot);
             throw new Error(err);
         }
-        return toot;
+        return toot.json;
     }
     /**
      * Post a reply
@@ -61,5 +63,11 @@ export default class MastodonClient extends RemoteClient {
             status: content,
             in_reply_to_id: replyToId,
         });
+    }
+    /**
+     * Get the current user ID
+     */
+    getUserId() {
+        return this.userId;
     }
 }

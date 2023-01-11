@@ -3,6 +3,7 @@ import { DAVINCI_MODEL } from './OpenAIConfig.js';
 let config;
 const KEY_MASTODON_API_URL = 'MASTODON_API_URL';
 const KEY_MASTODON_ACCESS_TOKEN = 'MASTODON_ACCESS_TOKEN';
+const KEY_MASTODON_USER_ID = 'MASTODON_USER_ID';
 const KEY_OPEN_AI_API_KEY = 'OPEN_AI_API_KEY';
 export default class Config {
     config;
@@ -18,6 +19,7 @@ export default class Config {
         return {
             apiUrl: this.config[KEY_MASTODON_API_URL],
             accessToken: this.config[KEY_MASTODON_ACCESS_TOKEN],
+            userId: this.config[KEY_MASTODON_USER_ID],
         };
     }
     getOpenAIConfig() {

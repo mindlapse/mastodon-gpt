@@ -8,6 +8,7 @@ resource "aws_ssm_parameter" "config" {
 
     MASTODON_API_URL      = ""
     MASTODON_ACCESS_TOKEN = ""
+    MASTODON_USER_ID      = ""
     OPEN_AI_API_KEY       = ""
 
   })

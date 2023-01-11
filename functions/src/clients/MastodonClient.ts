@@ -3,6 +3,9 @@ import { MastodonClientConfig } from '../config/MastodonClientConfig.js'
 import * as Mastodon from 'tsl-mastodon-api'
 
 export default class MastodonClient extends RemoteClient<Mastodon.API> {
+
+    private userId: string;
+
     /**
      * Construct a new user-specific Mastodon Client
      *
@@ -19,6 +22,7 @@ export default class MastodonClient extends RemoteClient<Mastodon.API> {
             },
             cleanUp: async () => {},
         })
+        this.userId = config.userId;
     }
 
     /**
@@ -44,16 +48,16 @@ export default class MastodonClient extends RemoteClient<Mastodon.API> {
      *
      * @param id
      * @throws Error if the toot could not be loaded.
-     * @returns Promise<Mastodon.API.Success<Mastodon.JSON.Status>>
+     * @returns Promise<Mastodon.JSON.Status>
      */
-    public async getToot(id: string) {
+    public async getToot(id: string): Promise<Mastodon.JSON.Status> {
         const toot = await this.getClient().getStatus(id)
         if (toot.failed) {
             const err = `Failed to load toot ${id}`
             console.error(err, toot)
             throw new Error(err)
         }
-        return toot
+        return toot.json
     }
 
     /**
@@ -67,5 +71,12 @@ export default class MastodonClient extends RemoteClient<Mastodon.API> {
             status: content,
             in_reply_to_id: replyToId,
         })
+    }
+
+    /**
+     * Get the current user ID
+     */
+    public getUserId() {
+        return this.userId;
     }
 }
