@@ -3,8 +3,7 @@ import { MastodonClientConfig } from '../config/MastodonClientConfig.js'
 import * as Mastodon from 'tsl-mastodon-api'
 
 export default class MastodonClient extends RemoteClient<Mastodon.API> {
-
-    private userId: string;
+    private userId: string
 
     /**
      * Construct a new user-specific Mastodon Client
@@ -22,7 +21,7 @@ export default class MastodonClient extends RemoteClient<Mastodon.API> {
             },
             cleanUp: async () => {},
         })
-        this.userId = config.userId;
+        this.userId = config.userId
     }
 
     /**
@@ -77,6 +76,6 @@ export default class MastodonClient extends RemoteClient<Mastodon.API> {
      * Get the current user ID
      */
     public getUserId() {
-        return this.userId;
+        return this.userId
     }
 }

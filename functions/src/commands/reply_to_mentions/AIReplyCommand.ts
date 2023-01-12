@@ -1,85 +1,123 @@
+import Notification from 'tsl-mastodon-api/lib/JSON/Notification.js'
 import MastodonClient from '../../clients/MastodonClient.js'
 import OpenAIClient from '../../clients/OpenAIClient.js'
 import { extractText } from '../../lib/util/html.js'
 
+enum NextAction {
+    DELETE_MENTION,
+    RETRY,
+    CONTINUE,
+}
+
 export default class AIReplyCommand {
     private mastodon: MastodonClient
     private openai: OpenAIClient
-    private static SUFFIX =
-        'As @gpt, think carefully and respond with an ' +
-        'engaging detailed genius response that adds dimensionality. ' +
-        "Do not refer to 'us' or 'we' or '@gpt'. Do not put your answer in quotes. " +
-        'The answer must be less than 100 words. Do not reference to your own response ' +
-        'and do not mention the tweet above.\n\n'
+    private maxRetries: number
+    private maxLength: number
 
     constructor(mc: MastodonClient, oc: OpenAIClient) {
         this.mastodon = mc
         this.openai = oc
+        this.maxRetries = 2
+        this.maxLength = 500
     }
+
+    createCompletionRequest(mentionText: string, originalText: string|undefined, shorten: boolean) {
+        let prefix
+        if (originalText) {
+            prefix =
+                `Here is a tweet: '${originalText}'. ` +
+                `Here is the reply: '${mentionText}'. `
+        } else {
+            prefix = `Here is a tweet: '${mentionText}'. `
+        }
+
+        return prefix + 'As @gpt, think carefully and respond with an ' +
+            'engaging detailed genius response that adds dimensionality. ' +
+            "Do not refer to 'us' or 'we' or '@gpt'. Do not put your answer in quotes. " +
+            `Answer must be <= ${shorten ? 60 : 80} words. Do not reference to your own response ` +
+            'and do not mention the tweet above.\n\n';
+    }
+
 
     async send() {
         const mentions = await this.mastodon.getMentions()
         console.log(`Loaded ${mentions?.json?.length ?? 0} mentions`)
 
         for (let mentionToot of mentions.json) {
-            let originalToot, originalText
+            let retries = 0, nextAction;
+            do {
+                nextAction = await this.handleMention(mentionToot, retries > 0)
 
-            // Extract text content from the mention
-            const mentionText = extractText(mentionToot.status.content)
-
-            // Load original (if present)
-            const { in_reply_to_id } = mentionToot.status
-            if (in_reply_to_id) {
-                originalToot = await this.mastodon.getToot(in_reply_to_id)
-                originalText = extractText(originalToot.content)
-                
-                // If the original post was from this bot, then only reply if
-                // the mention included a question mark in it. (less annoying)
-                if (originalToot.account.id === this.mastodon.getUserId() &&
-                    !originalText.includes("?")) {
-                    console.log("Ignoring follow-up mention: a '?' must be present to respond.")
-                    await this.mastodon.deleteMention(mentionToot.id)
-                    continue;
+                switch (nextAction) {
+                    case NextAction.DELETE_MENTION:
+                        await this.mastodon.deleteMention(mentionToot.id)
+                        break;
+                    case NextAction.RETRY:
+                        retries++;
+                        break;
                 }
-            }
+            } while (nextAction === NextAction.RETRY && retries <= this.maxRetries)
+        }
+    }
 
-            // Perform content moderation
-            const flagged = await this.openai.isFlaggedByModeration(
-                `${originalText} ${mentionText}`
-            )
-            if (flagged) {
-                console.log('Content flagged. Skip.')
-                await this.mastodon.deleteMention(mentionToot.id)
-                continue
-            }
+    async handleMention(mentionToot: Notification, isRetry: boolean) {
+        let originalToot, originalText
 
-            // Moderation passed, form the completion request
-            let prefix
-            if (originalToot) {
-                prefix =
-                    `Here is a tweet: '${originalText}'. ` +
-                    `Here is the reply: '${mentionText}'. `
-            } else {
-                prefix = `Here is a tweet: '${mentionText}'. `
-            }
-            const completionRequest = prefix + AIReplyCommand.SUFFIX
-            console.log('Completion request', completionRequest)
+        // Extract text content from the mention
+        const mentionText = extractText(mentionToot.status.content)
 
-            // Fetch completion from OpenAI
-            const reply = await this.openai.getCompletion(completionRequest)
-            console.log('Completion reply', reply)
-
-            // Delete the mention from Mastodon
-            await this.mastodon.deleteMention(mentionToot.id)
-
-            // Post the reply to Mastodon
-            if (reply) {
-                try {
-                    await this.mastodon.postReply(mentionToot.status.id, reply)
-                } catch (e) {
-                    console.error('Error', e)
-                }
+        // Load original (if present)
+        const { in_reply_to_id } = mentionToot.status
+        if (in_reply_to_id) {
+            originalToot = await this.mastodon.getToot(in_reply_to_id)
+            originalText = extractText(originalToot.content)
+            
+            // If the original post was from this bot, then only reply if
+            // the mention included a question mark in it. (less annoying)
+            if (originalToot.account.id === this.mastodon.getUserId() &&
+                !originalText.includes("?")) {
+                console.log("Ignoring follow-up mention: a '?' must be present to respond.")
+                return NextAction.DELETE_MENTION
             }
         }
+
+        // Perform content moderation
+        const flagged = await this.openai.isFlaggedByModeration(
+            `${originalText} ${mentionText}`
+        )
+        if (flagged) {
+            console.log('Content flagged. Skip.')
+            return NextAction.DELETE_MENTION
+        }
+
+        // Moderation passed, form the completion request
+        const completionRequest = this.createCompletionRequest(mentionText, originalText, isRetry);
+        console.log('Completion request', completionRequest)
+
+        // Fetch completion from OpenAI
+        const reply = await this.openai.getCompletion(completionRequest)
+        console.log('Completion reply', reply)
+
+        // Delete the mention from Mastodon
+        if (!isRetry) {
+            await this.mastodon.deleteMention(mentionToot.id)
+        }
+
+        // Post the reply to Mastodon
+        if (reply) {
+            if (reply.length > this.maxLength) {
+                console.log("Too long, retrying")
+                return NextAction.RETRY
+            }
+            try {
+                await this.mastodon.postReply(mentionToot.status.id, reply)
+                console.log("Reply posted")
+            } catch (e) {
+                console.error('Error', e)
+                return NextAction.RETRY
+            }
+        }
+        return NextAction.CONTINUE;
     }
 }
