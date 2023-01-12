@@ -1,4 +1,5 @@
 import { extractText } from '../../lib/util/html.js';
+import ThreadContext from './ThreadContext.js';
 var NextAction;
 (function (NextAction) {
     NextAction[NextAction["DELETE_MENTION"] = 0] = "DELETE_MENTION";
@@ -9,27 +10,21 @@ export default class AIReplyCommand {
     mastodon;
     openai;
     maxRetries;
-    maxLength;
+    maxPostLength;
+    maxThreadChars;
     constructor(mc, oc) {
         this.mastodon = mc;
         this.openai = oc;
         this.maxRetries = 2;
-        this.maxLength = 500;
+        this.maxPostLength = 500;
+        this.maxThreadChars = 3072;
     }
-    createCompletionRequest(mentionText, originalText, shorten) {
-        let prefix;
-        if (originalText) {
-            prefix =
-                `Here is a tweet: '${originalText}'. ` +
-                    `Here is the reply: '${mentionText}'. `;
-        }
-        else {
-            prefix = `Here is a tweet: '${mentionText}'. `;
-        }
-        return prefix + 'As @gpt, think carefully and respond with an ' +
+    createCompletionRequest(conversation, length) {
+        const prefix = `Here is a tweet conversation: <start>${conversation}<end>. `;
+        return `${prefix}As @gpt, think carefully and respond with an ` +
             'engaging detailed genius response that adds dimensionality. ' +
             "Do not refer to 'us' or 'we' or '@gpt'. Do not put your answer in quotes. " +
-            `Answer must be <= ${shorten ? 60 : 80} words. Do not reference to your own response ` +
+            `Answer must be <= ${length} words. Do not reference to your own response ` +
             'and do not mention the tweet above.\n\n';
     }
     async send() {
@@ -37,8 +32,9 @@ export default class AIReplyCommand {
         console.log(`Loaded ${mentions?.json?.length ?? 0} mentions`);
         for (let mentionToot of mentions.json) {
             let retries = 0, nextAction;
+            let maxLength = 60;
             do {
-                nextAction = await this.handleMention(mentionToot, retries > 0);
+                nextAction = await this.handleMention(mentionToot, retries > 0, maxLength);
                 switch (nextAction) {
                     case NextAction.DELETE_MENTION:
                         await this.mastodon.deleteMention(mentionToot.id);
@@ -47,50 +43,60 @@ export default class AIReplyCommand {
                         retries++;
                         break;
                 }
+                maxLength -= 20;
             } while (nextAction === NextAction.RETRY && retries <= this.maxRetries);
         }
     }
-    async handleMention(mentionToot, isRetry) {
-        let originalToot, originalText;
-        // Extract text content from the mention
-        const mentionText = extractText(mentionToot.status.content);
-        // Load original (if present)
-        const { in_reply_to_id } = mentionToot.status;
+    async buildThreadContext(toot, ctx) {
+        if (!ctx)
+            ctx = new ThreadContext(this.maxThreadChars);
+        let priorToot;
+        const roomStillAvailable = ctx.add(toot);
+        const { in_reply_to_id } = toot;
         if (in_reply_to_id) {
-            originalToot = await this.mastodon.getToot(in_reply_to_id);
-            originalText = extractText(originalToot.content);
-            // If the original post was from this bot, then only reply if
-            // the mention included a question mark in it. (less annoying)
-            if (originalToot.account.id === this.mastodon.getUserId() &&
-                !originalText.includes("?")) {
-                console.log("Ignoring follow-up mention: a '?' must be present to respond.");
-                return NextAction.DELETE_MENTION;
-            }
+            priorToot = await this.mastodon.getToot(in_reply_to_id);
+            return !roomStillAvailable ? ctx : this.buildThreadContext(priorToot, ctx);
+        }
+        return ctx;
+    }
+    async handleMention(mention, isRetry, maxLength) {
+        // Extract text content from the mention
+        const mentionText = extractText(mention.status.content);
+        // Load the conversation into a thread context
+        const threadContext = await this.buildThreadContext(mention.status);
+        const conversation = threadContext.asConversation();
+        console.log("Loaded conversation", conversation);
+        // If the mention does not include a question, and GPT
+        // is already in the thread, then ignore.
+        if (threadContext.hasUserId(this.mastodon.getUserId()) &&
+            !mentionText.includes("?")) {
+            console.log("Ignoring follow-up mention: a '?' must be present to respond.");
+            return NextAction.DELETE_MENTION;
         }
         // Perform content moderation
-        const flagged = await this.openai.isFlaggedByModeration(`${originalText} ${mentionText}`);
+        const flagged = await this.openai.isFlaggedByModeration(conversation);
         if (flagged) {
             console.log('Content flagged. Skip.');
             return NextAction.DELETE_MENTION;
         }
         // Moderation passed, form the completion request
-        const completionRequest = this.createCompletionRequest(mentionText, originalText, isRetry);
+        const completionRequest = this.createCompletionRequest(conversation, maxLength);
         console.log('Completion request', completionRequest);
         // Fetch completion from OpenAI
         const reply = await this.openai.getCompletion(completionRequest);
         console.log('Completion reply', reply);
         // Delete the mention from Mastodon
         if (!isRetry) {
-            await this.mastodon.deleteMention(mentionToot.id);
+            await this.mastodon.deleteMention(mention.id);
         }
         // Post the reply to Mastodon
         if (reply) {
-            if (reply.length > this.maxLength) {
+            if (reply.length > this.maxPostLength) {
                 console.log("Too long, retrying");
                 return NextAction.RETRY;
             }
             try {
-                await this.mastodon.postReply(mentionToot.status.id, reply);
+                await this.mastodon.postReply(mention.status.id, reply);
                 console.log("Reply posted");
             }
             catch (e) {
